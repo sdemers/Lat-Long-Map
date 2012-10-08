@@ -1,0 +1,454 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<title>Latitude/Longitude - Map</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<style type="text/css">
+  div { font-family: Arial, Helvetica, sans-serif; font-size: 10pt; }
+  input { font-size: 9pt; }
+  #debug { color: blue; }
+  #message { color: red; }
+
+</style>
+<script src="http://maps.google.com/maps?file=api&amp;v=2&amp;key=ABQIAAAAaZqHtMoymJ-Twp_Lo1xa6xTufapCdRkm4PeqPJIuIKhEUid5fBRIB_W9bGEw9GzjQv4iPlIs2dOXtQ"
+type="text/javascript"></script>
+
+<script type="text/javascript">
+    window.onload = drawMap;
+    window.onunload = GUnload;
+
+    var markers = new Array();
+    markers.current = null;
+    var clockTimeout = null;
+    var messageTimeout = null;
+
+    function debug(str)
+    {
+        doDebug = true;
+
+        if (doDebug == false)
+        {
+            return;
+        }
+
+        document.getElementById("debug").innerHTML = str;
+    }
+
+    function message(str)
+    {
+        document.getElementById("message").innerHTML = str;
+
+        messageTimeout= window.setTimeout(function() { clearMessage() }, 1000);
+    }
+
+    function clearMessage()
+    {
+        document.getElementById("message").innerHTML = "";
+        window.clearTimeout(messageTimeout);
+        messageTimeout = null;
+    }
+
+    function findMarker(mk)
+    {
+        for (i = 0; i < markers.length; ++i)
+        {
+            if (markers[i] == mk)
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    function setCurrentMarker(mk)
+    {
+        var i = findMarker(mk);
+        if (i >= 0)
+        {
+            markers.current = mk;
+        }
+    }
+
+    function isCurrentMarker(mk)
+    {
+        return markers.current == mk;
+    }
+
+    function removeMarker(mk)
+    {
+        var i = findMarker(mk);
+
+        if (i >= 0)
+        {
+            if (isCurrentMarker(mk))
+            {
+                markers.current = null;
+            }
+
+            markers.splice(i, 1);
+            return true;
+        }
+
+        return false;
+    }
+
+    function setMarkerListeners(mk)
+    {
+        GEvent.addListener(mk, 'click', function() { setCurrentMarker(mk); printCoords(mk) });
+        GEvent.addListener(mk, 'drag', function() { setCurrentMarker(mk); printCoords(mk) });
+    }
+
+    function createMarker(lat, lon)
+    {
+        var pt   = new GLatLng(lat, lon);
+
+        //var icon = new GIcon("http://www.google.com/intl/en_us/mapfiles/ms/micons/" + color + "-dot.png");
+        //icon.size = new GSize(16,16)  
+        //icon.iconAnchor = new GPoint(8,9)
+        //icon.infoWindowAnchor = new GPoint(7,7) 
+
+        var opt = {}
+        //opt.icon = icon;
+        opt.draggable = true;
+        opt.clickable = true;
+        opt.bouncy = false;
+
+        var mk = new GMarker(pt, opt);
+
+        setMarkerListeners(mk);
+
+        return mk;
+    }
+
+    function markerToStrings(mk)
+    {
+        var pt = mk.getLatLng();
+        var strings = new Array();
+
+        strings[0] = pt.latRadians().toFixed(7) + ", " + pt.lngRadians().toFixed(7);
+        strings[1] = pt.lat().toFixed(5) + ", " + pt.lng().toFixed(5);
+        strings[2] = pt.lat().toLat() + ', ' + pt.lng().toLong();
+
+        return strings;
+    }
+
+    function printCoords(mk)
+    {
+        var strings = markerToStrings(mk);
+        document.forms['coordsForm'].radians.value = strings[0];
+        document.forms['coordsForm'].degrees.value = strings[1];
+        document.forms['coordsForm'].dms.value = strings[2];
+    }
+
+    function clearCoords()
+    {
+        document.forms['coordsForm'].radians.value = "";
+        document.forms['coordsForm'].degrees.value = "";
+        document.forms['coordsForm'].dms.value = "";
+    }
+
+    function setLatLong(latLong)
+    {
+        if (markers.current != null)
+        {
+            markers.current.setLatLng(latLong);
+        }
+    }
+
+    function addMarker(map, latLong)
+    {
+        var mk = createMarker(latLong.lat(), latLong.lng());
+        markers[markers.length] = mk;
+
+        map.addOverlay(mk);
+
+        setCurrentMarker(mk);
+
+        printCoords(mk);
+    }
+
+    function drawMap()
+    {
+        clearCoords();
+
+        // create the map
+        var map = new GMap2(document.getElementById("map"));
+        map.addControl(new GLargeMapControl());
+        map.addControl(new GMapTypeControl());
+        map.enableScrollWheelZoom();
+        map.disableDoubleClickZoom();
+
+        var center = new GLatLng(45.42931, -73.45893);
+        map.setCenter(center, 7, G_NORMAL_MAP);
+
+        GEvent.addListener(map, 'click', function(ol, latlon, olLatlon) { mapClick(map, ol, latlon, olLatlon); });
+
+        GEvent.addListener(map, 'singlerightclick',
+                            function(point, src, overlay)
+                            {
+                                if (isCurrentMarker(overlay))
+                                {
+                                    clearCoords();
+                                }
+
+                                if (removeMarker(overlay) == true)
+                                {
+                                    map.removeOverlay(overlay);
+                                }
+                            });
+    }
+
+    function mapClick(map, ol, latlon, olLatlon)
+    {
+        if (clockTimeout)
+        {
+            window.clearTimeout(clockTimeout);
+            clockTimeout = null;
+            doubleClick(map, ol, latlon);
+        }
+        else
+        {
+            clockTimeout = window.setTimeout(function() { singleClick(map, ol, latlon, olLatlon) }, 300);
+        }
+    }
+
+    function doubleClick(map, ol, latlon, olLatlon)
+    {
+        // Process double click
+        map.panTo(latlon);
+    }
+
+    function singleClick(map, ol, latlon, olLatlon)
+    {
+        window.clearTimeout(clockTimeout);
+        clockTimeout = null;
+
+        // Process single click
+        if (ol == null)
+        {
+            addMarker(map, latlon);
+        }
+    }
+
+    function parseFloats(str)
+    {
+        var floats = str.split(',');
+
+        if (floats.length != 2)
+        {
+            return null;
+        }
+
+        floats[0] = parseFloat(floats[0]);
+        floats[1] = parseFloat(floats[1]);
+
+        if (isNaN(floats[0]) || isNaN(floats[1]))
+        {
+            return null;
+        }
+
+        return floats;
+    }
+
+    function setRadians(text)
+    {
+        var str = text.trim();
+
+        if (str.length == 0)
+        {
+            return;
+        }
+
+        var radians = parseFloats(str);
+
+        if (radians == null)
+        {
+            message("Parse error...");
+            return;
+        }
+
+        var latLong = new GLatLng(radians[0].toDegrees(), radians[1].toDegrees());
+        setLatLong(latLong);
+
+        if (markers.current != null)
+        {
+            printCoords(markers.current);
+        }
+    }
+
+    function setDegrees(text)
+    {
+        var str = text.trim();
+
+        if (str.length == 0)
+        {
+            return;
+        }
+
+        var degrees = parseFloats(str);
+
+        if (degrees == null)
+        {
+            message("Parse error...");
+            return;
+        }
+
+        var latLong = new GLatLng(degrees[0], degrees[1]);
+        setLatLong(latLong);
+
+        if (markers.current != null)
+        {
+            printCoords(markers.current);
+        }
+    }  
+
+    function setDMS(text)
+    {
+        var dmsStr = text.split(',');
+
+        if (dmsStr.length != 2)
+        {
+            return null;
+        }
+
+        var latStr = dmsStr[0].trim();
+        var lngStr = dmsStr[1].trim();
+
+        var latRe = new RegExp("([0-9][0-9]) ([0-9][0-9])'([0-9][0-9])\"([NS])");
+        var lngRe = new RegExp("([0-9][0-9][0-9]) ([0-9][0-9])'([0-9][0-9])\"([WE])");
+
+        if (latStr.match(latRe) == false ||
+            lngStr.match(lngRe) == false)
+        {
+            message("Parse error...");
+            return;
+        }
+
+        var latSplit = latStr.split(latRe);
+
+        if (latSplit.length < 5)
+        {
+            message("Error parsing latitudes...");
+            return;
+        }
+
+        var latSec = parseFloat(latSplit[3]) / 3600;
+        var latMin = parseFloat(latSplit[2]) / 60;
+        var latDeg = parseFloat(latSplit[1]) + latMin + latSec;
+        if (latSplit[4] == "S")
+        {
+            latDeg *= -1;
+        }
+
+        var lngSplit = lngStr.split(lngRe);
+
+        if (lngSplit.length < 5)
+        {
+            message("Error parsing longitudes...");
+            return;
+        }
+
+        var lngSec = parseFloat(lngSplit[3]) / 3600;
+        var lngMin = parseFloat(lngSplit[2]) / 60;
+        var lngDeg = parseFloat(lngSplit[1]) + lngMin + lngSec;
+        if (lngSplit[4] == "W")
+        {
+            lngDeg *= -1;
+        }
+
+        var latLong = new GLatLng(latDeg, lngDeg);
+        setLatLong(latLong);
+
+        if (markers.current != null)
+        {
+            printCoords(markers.current);
+        }
+    }
+
+// extend Number object with methods for presenting bearings & lat/longs
+
+Number.prototype.toDMS = function()
+{
+    // convert numeric degrees to deg/min/sec
+    var d = Math.abs(this);  // (unsigned result ready for appending compass dir'n)
+    d += 1/7200;  // add � second for rounding
+    var deg = Math.floor(d);
+    var min = Math.floor((d-deg)*60);
+    var sec = Math.floor((d-deg-min/60)*3600);
+    // add leading zeros if required
+    if (deg<100) deg = '0' + deg;
+    if (deg<10) deg = '0' + deg;
+    if (min<10) min = '0' + min;
+    if (sec<10) sec = '0' + sec;
+    //return deg + '\u00B0' + min + '\u2032' + sec + '\u2033';
+    return deg + ' ' + min + '\'' + sec + '\"';
+}
+
+Number.prototype.toDegrees = function()
+{
+    return this * 180 / Math.PI;
+}
+
+Number.prototype.toRadians = function()
+{
+    return this * Math.PI / 180;
+}
+
+Number.prototype.toPrecision = function(fig)
+{ 
+    // override toPrecision method with one which displays 
+    if (this == 0)
+    {
+        return 0;                      // trailing zeros in place of exponential notation
+    }
+
+    var scale = Math.ceil(Math.log(this)*Math.LOG10E);
+    var mult = Math.pow(10, fig-scale);
+    return Math.round(this*mult)/mult;
+}
+
+Number.prototype.toLat = function()
+{
+    // convert numeric degrees to deg/min/sec latitude
+    return this.toDMS().slice(1) + (this<0 ? 'S' : 'N');  // knock off initial '0' for lat!
+}
+
+Number.prototype.toLong = function()
+{
+    // convert numeric degrees to deg/min/sec longitude
+    return this.toDMS() + (this>0 ? 'E' : 'W');
+}
+
+String.prototype.trim = function()
+{
+    return this.replace(/^\s\s*/, '').replace(/\s\s*$/, '');
+}
+
+</script>
+</head>
+
+<body>
+    <div id="map" style="width:800px; height:600px; bottom:3px"></div>
+    <div id="coords" style="background-color:white; float:left; width:220px">
+        <form name="coordsForm">
+        <div style="float:left; width:55px">Radians:</div>
+        <div style="float:left">
+            <input type="text" name="radians" style="width:150px" onChange="setRadians(this.value)">
+        </div>
+        <div style="float:left; width:55px">Degrees:</div>
+        <div style="float:left">
+            <input type="text" name="degrees" style="width:150px" onChange="setDegrees(this.value)">
+        </div>
+        <div style="float:left; width:55px">DMS:</div>
+        <div style="float:left">
+            <input type="text" name="dms" style="width:150px" onChange="setDMS(this.value)">
+        </div>
+    </div>
+    <div id="usage" style="float:left; position:absolute; left:650px">
+        Click: add marker<br>Right-Click: remove marker<br>Double-Click: center map
+    </div>
+    <div id="debug" style="clear:left"></div>
+    <div id="message" style="clear:left"></div>
+</body>
+</html>
